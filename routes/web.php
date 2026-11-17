@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\AvatarController;
+use App\Http\Controllers\BrandController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\UserController;
 use Illuminate\Support\Facades\Route;
@@ -24,6 +25,15 @@ Route::middleware(['auth', 'active', 'password.changed'])->group(function () {
     Route::post('/profile/sessions/others', [ProfileController::class, 'logoutOtherSessions'])->name('profile.sessions.others');
 
     Route::get('/avatars/{user}', [AvatarController::class, 'show'])->name('avatars.show');
+
+    Route::prefix('brands')->name('brands.')->group(function () {
+        Route::get('/', [BrandController::class, 'index'])->name('index');
+        Route::get('/create', [BrandController::class, 'create'])->name('create');
+        Route::post('/', [BrandController::class, 'store'])->name('store');
+        Route::get('/{brand}/edit', [BrandController::class, 'edit'])->name('edit');
+        Route::put('/{brand}', [BrandController::class, 'update'])->name('update');
+        Route::get('/{brand}/logo', [BrandController::class, 'logo'])->name('logo');
+    });
 
     Route::middleware('superadmin')->prefix('users')->name('users.')->group(function () {
         Route::get('/', [UserController::class, 'index'])->name('index');

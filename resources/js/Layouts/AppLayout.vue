@@ -14,12 +14,14 @@ const menuRoot = ref(null);
 
 const icons = {
     dashboard: 'M3 12l9-9 9 9M5 10v10h5v-6h4v6h5V10',
+    brands: 'M20.6 13.4l-7.2 7.2a2 2 0 01-2.8 0L2 12V2h10l8.6 8.6a2 2 0 010 2.8zM7 7h.01',
     users: 'M17 20v-2a4 4 0 00-4-4H7a4 4 0 00-4 4v2M10 10a4 4 0 100-8 4 4 0 000 8zM21 20v-2a4 4 0 00-3-3.87M16 2.13a4 4 0 010 7.75',
 };
 
 const items = computed(() => {
     if (locked.value) return [];
     const list = [{ label: 'Dashboard', href: '/', icon: 'dashboard', match: '/' }];
+    list.push({ label: 'Brands', href: '/brands', icon: 'brands', match: '/brands' });
     if (user.value.role === 'superadmin') list.push({ label: 'Users', href: '/users', icon: 'users', match: '/users' });
     return list;
 });
