@@ -2,6 +2,7 @@
 import { ref } from 'vue';
 import { Head, Link, router, usePage } from '@inertiajs/vue3';
 import AppLayout from '../../Layouts/AppLayout.vue';
+import Avatar from '../../Components/Avatar.vue';
 
 const props = defineProps({ users: Object, filters: Object });
 const me = usePage().props.auth.user;
@@ -33,7 +34,15 @@ const toggle = (u) => {
                 </thead>
                 <tbody>
                     <tr v-for="u in users.data" :key="u.id" class="border-t border-slate-100">
-                        <td class="px-4 py-2">{{ u.name }}<div class="text-xs text-slate-500">{{ u.email }}</div></td>
+                        <td class="px-4 py-2">
+                            <div class="flex items-center gap-3">
+                                <Avatar :name="u.name" :url="u.avatar_url" :size="36" />
+                                <div>
+                                    {{ u.name }}
+                                    <div class="text-xs text-slate-500">{{ [u.job_title, u.email].filter(Boolean).join(' · ') }}</div>
+                                </div>
+                            </div>
+                        </td>
                         <td class="px-4 py-2 font-mono">{{ u.username }}</td>
                         <td class="px-4 py-2 capitalize">{{ u.role }}</td>
                         <td class="px-4 py-2">

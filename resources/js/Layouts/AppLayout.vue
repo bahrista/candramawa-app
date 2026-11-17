@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { Link, router, usePage } from '@inertiajs/vue3';
+import Avatar from '../Components/Avatar.vue';
 
 const page = usePage();
 const user = computed(() => page.props.auth.user);
@@ -33,7 +34,6 @@ const sectionTitle = computed(() => {
     return items.value.find(isActive)?.label ?? '';
 });
 
-const initials = computed(() => user.value.name.split(' ').map((w) => w[0]).slice(0, 2).join('').toUpperCase());
 const logout = () => router.post('/logout');
 
 const closeOnOutside = (e) => {
@@ -100,13 +100,17 @@ onBeforeUnmount(() => {
                         @click="menuOpen = !menuOpen"
                     >
                         <span class="hidden text-slate-600 sm:inline">Howdy, <span class="font-medium text-[#1d2327]">{{ user.name }}</span></span>
-                        <span class="flex h-8 w-8 items-center justify-center rounded-full bg-wp-sidebar text-xs font-semibold text-white">{{ initials }}</span>
+                        <Avatar :name="user.name" :url="user.avatar_url" :size="32" />
                     </button>
 
                     <div v-if="menuOpen" class="absolute right-0 mt-1 w-56 rounded border border-[#dcdcde] bg-white py-1 shadow-lg">
-                        <div class="border-b border-[#f0f0f1] px-4 py-2">
-                            <div class="truncate text-sm font-medium">{{ user.name }}</div>
-                            <div class="text-xs capitalize text-slate-500">{{ user.role }} · {{ user.username }}</div>
+                        <div class="flex items-center gap-3 border-b border-[#f0f0f1] px-4 py-3">
+                            <Avatar :name="user.name" :url="user.avatar_url" :size="40" />
+                            <div class="min-w-0">
+                                <div class="truncate text-sm font-medium">{{ user.name }}</div>
+                                <div class="truncate text-xs text-slate-500">{{ user.job_title || user.username }}</div>
+                                <div class="text-xs capitalize text-slate-400">{{ user.role }}</div>
+                            </div>
                         </div>
                         <Link href="/profile" class="block px-4 py-2 text-sm hover:bg-[#f0f6fc] hover:text-indigo-600" @click="menuOpen = false">Edit Profile</Link>
                         <button class="block w-full px-4 py-2 text-left text-sm hover:bg-[#f0f6fc] hover:text-indigo-600" @click="logout">Log Out</button>

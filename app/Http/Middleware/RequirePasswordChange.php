@@ -13,7 +13,7 @@ class RequirePasswordChange
     {
         $user = $request->user();
 
-        if ($user && $user->must_change_password && ! $request->routeIs('profile.*', 'logout')) {
+        if ($user && $user->must_change_password && ! $request->routeIs('profile.*', 'logout', 'avatars.show')) {
             return redirect()->route('profile.show')
                 ->with('success', 'Please change your temporary password to continue.');
         }

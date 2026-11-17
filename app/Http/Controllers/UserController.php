@@ -28,7 +28,7 @@ class UserController extends Controller
             ->orderBy('name')
             ->paginate(15)
             ->withQueryString()
-            ->through(fn (User $u) => $u->only(['id', 'name', 'username', 'email', 'role', 'is_active']));
+            ->through(fn (User $u) => $u->only(['id', 'name', 'username', 'email', 'job_title', 'role', 'is_active']) + ['avatar_url' => $u->avatarUrl()]);
 
         return Inertia::render('Users/Index', [
             'users' => $users,

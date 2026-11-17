@@ -4,7 +4,9 @@ namespace Tests\Feature;
 
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class UserManagementTest extends TestCase
@@ -161,5 +163,78 @@ class UserManagementTest extends TestCase
         $u = User::where('username', 'bahrista')->first();
         $this->assertTrue($u->isSuperadmin());
         $this->assertNull($u->created_by);
+    }
+
+    public function test_profile_saves_job_title_and_normalises_whatsapp(): void
+    {
+        $u = User::factory()->create();
+
+        $this->actingAs($u)->put('/profile', [
+            'name' => 'Ani', 'email' => '', 'job_title' => ' Strategist ', 'whatsapp' => '0812-3456-7890',
+        ])->assertSessionHasNoErrors();
+
+        $u->refresh();
+        $this->assertSame('Strategist', $u->job_title);
+        $this->assertSame('+6281234567890', $u->whatsapp);
+
+        $this->put('/profile', ['name' => 'Ani', 'whatsapp' => 'abc'])->assertSessionHasErrors('whatsapp');
+        $this->put('/profile', ['name' => 'Ani', 'whatsapp' => '', 'job_title' => ''])->assertSessionHasNoErrors();
+        $this->assertNull($u->fresh()->whatsapp);
+        $this->assertNull($u->fresh()->job_title);
+    }
+
+    public function test_avatar_upload_replace_serve_and_remove(): void
+    {
+        Storage::fake('local');
+        $u = User::factory()->create();
+
+        $this->actingAs($u)->post('/profile/avatar', ['avatar' => UploadedFile::fake()->image('a.jpg', 200, 200)])
+            ->assertSessionHasNoErrors();
+        $first = $u->fresh()->avatar_path;
+        Storage::disk('local')->assertExists($first);
+        $this->get("/avatars/{$u->id}")->assertOk();
+
+        $this->post('/profile/avatar', ['avatar' => UploadedFile::fake()->image('b.png', 100, 100)]);
+        Storage::disk('local')->assertMissing($first);
+
+        $this->delete('/profile/avatar');
+        $this->assertNull($u->fresh()->avatar_path);
+        $this->get("/avatars/{$u->id}")->assertNotFound();
+    }
+
+    public function test_avatar_rejects_non_images_and_big_files_and_needs_login(): void
+    {
+        Storage::fake('local');
+        $u = User::factory()->create();
+
+        $this->actingAs($u)->post('/profile/avatar', ['avatar' => UploadedFile::fake()->create('x.pdf', 10, 'application/pdf')])
+            ->assertSessionHasErrors('avatar');
+        $this->post('/profile/avatar', ['avatar' => UploadedFile::fake()->image('big.jpg')->size(3000)])
+            ->assertSessionHasErrors('avatar');
+
+        auth()->logout();
+        $this->get("/avatars/{$u->id}")->assertRedirect('/login');
+    }
+
+    public function test_user_with_temporary_password_can_still_load_avatar(): void
+    {
+        Storage::fake('local');
+        $u = User::factory()->mustChangePassword()->create();
+        $this->actingAs($u)->post('/profile/avatar', ['avatar' => UploadedFile::fake()->image('a.jpg')]);
+
+        $this->get("/avatars/{$u->id}")->assertOk();
+    }
+
+    public function test_logout_other_devices_keeps_current_session_and_needs_password(): void
+    {
+        $u = User::factory()->create(['password' => 'secret123']);
+        DB::table('sessions')->insert(['id' => 'other1', 'user_id' => $u->id, 'payload' => 'x', 'last_activity' => time()]);
+
+        $this->actingAs($u)->post('/profile/sessions/others', ['current_password' => 'wrong'])
+            ->assertSessionHasErrors('current_password');
+        $this->assertDatabaseHas('sessions', ['id' => 'other1']);
+
+        $this->post('/profile/sessions/others', ['current_password' => 'secret123'])->assertSessionHas('success');
+        $this->assertDatabaseMissing('sessions', ['id' => 'other1']);
     }
 }

@@ -23,6 +23,8 @@ class HandleInertiaRequests extends Middleware
                     'username' => $user->username,
                     'email' => $user->email,
                     'role' => $user->role,
+                    'job_title' => $user->job_title,
+                    'avatar_url' => $user->avatarUrl(),
                     'must_change_password' => $user->must_change_password,
                 ] : null,
             ],
