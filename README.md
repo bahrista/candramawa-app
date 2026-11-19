@@ -31,8 +31,23 @@ Buka http://localhost:8000 lalu login dengan username Superadmin tadi.
 - User boleh mengubah nama dan email sendiri; username hanya Superadmin.
 - Kata sandi sementara (dibuat Superadmin) memaksa user ke halaman Profile sampai diganti.
 
+## Content Plan
+
+Menu **Content Plan** di sidebar berisi **Add Content Plan** dan **All Content**.
+
+- Satu form untuk semua tombol: **Save Draft**, **Submit to Production**, **Submit to Review**
+  (di tahap berikutnya juga **Save Changes** dan **Return to Production**).
+- Alur status: Draft → In Production → In Review. Draft hanya terlihat oleh pembuatnya (Content Manager)
+  dan Superadmin. Setelah di-submit ke produksi, orang yang ditugaskan (Multimedia Creator, Copy Writer,
+  Publisher) ikut melihatnya dan mengisi *Post detail*.
+- Tanggal dan jam tampil dalam zona waktu `CONTENT_TIMEZONE` (bawaan `Asia/Jakarta`, WIB); disimpan sebagai UTC.
+- Saran isian Content Pillar dan Format ada di `config/content.php`.
+- Pratinjau memuat file Google Drive. File harus dibagikan sebagai "Anyone with the link"
+  (atau pelihat sudah login ke akun Google yang punya akses).
+
 ## Tes
 
 ```bash
-php artisan test
+php artisan test      # PHP
+npm run test:js       # JavaScript (pengenal link Google Drive, format tanggal)
 ```

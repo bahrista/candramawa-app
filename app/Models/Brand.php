@@ -2,7 +2,9 @@
 
 namespace App\Models;
 
+use Database\Factories\BrandFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -10,6 +12,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 #[Fillable(['name', 'description', 'color'])]
 class Brand extends Model
 {
+    /** @use HasFactory<BrandFactory> */
+    use HasFactory;
+
     public const DEFAULT_COLOR = '#2271b1';
 
     public function creator(): BelongsTo

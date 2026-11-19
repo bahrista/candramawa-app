@@ -3,6 +3,7 @@
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\AvatarController;
 use App\Http\Controllers\BrandController;
+use App\Http\Controllers\ContentPlanController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\UserController;
 use Illuminate\Support\Facades\Route;
@@ -33,6 +34,15 @@ Route::middleware(['auth', 'active', 'password.changed'])->group(function () {
         Route::get('/{brand}/edit', [BrandController::class, 'edit'])->name('edit');
         Route::put('/{brand}', [BrandController::class, 'update'])->name('update');
         Route::get('/{brand}/logo', [BrandController::class, 'logo'])->name('logo');
+    });
+
+    Route::prefix('content-plans')->name('content-plans.')->group(function () {
+        Route::get('/', [ContentPlanController::class, 'index'])->name('index');
+        Route::get('/create', [ContentPlanController::class, 'create'])->name('create');
+        Route::post('/', [ContentPlanController::class, 'store'])->name('store');
+        Route::get('/{contentPlan}', [ContentPlanController::class, 'show'])->name('show');
+        Route::put('/{contentPlan}', [ContentPlanController::class, 'update'])->name('update');
+        Route::delete('/{contentPlan}', [ContentPlanController::class, 'destroy'])->name('destroy');
     });
 
     Route::middleware('superadmin')->prefix('users')->name('users.')->group(function () {

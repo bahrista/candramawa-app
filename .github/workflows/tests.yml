@@ -47,3 +47,6 @@ jobs:
 
       - name: Execute tests
         run: php artisan test
+
+      - name: Execute JavaScript tests
+        run: npm run test:js
