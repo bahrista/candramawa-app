@@ -6,6 +6,7 @@ const props = defineProps({
     label: String,
     modelValue: { type: [String, Number], default: null },
     options: { type: Array, default: () => [] },
+    groups: { type: Array, default: null }, // [{ label, options: [{ value, label }] }] shown as <optgroup>s
     placeholder: String,
     error: String,
     hint: String,
@@ -15,7 +16,8 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue']);
 
 // <select> always yields strings; hand back the option's own value (e.g. a numeric id).
-const pick = (raw) => (raw === '' ? null : (props.options.find((o) => String(o.value) === raw)?.value ?? raw));
+const everyOption = () => [...props.options, ...(props.groups ?? []).flatMap((g) => g.options)];
+const pick = (raw) => (raw === '' ? null : (everyOption().find((o) => String(o.value) === raw)?.value ?? raw));
 </script>
 
 <template>
@@ -34,6 +36,9 @@ const pick = (raw) => (raw === '' ? null : (props.options.find((o) => String(o.v
         >
             <option v-if="placeholder !== undefined" value="">{{ placeholder }}</option>
             <option v-for="o in options" :key="o.value" :value="o.value">{{ o.label }}</option>
+            <optgroup v-for="g in groups ?? []" :key="g.label" :label="g.label">
+                <option v-for="o in g.options" :key="o.value" :value="o.value">{{ o.label }}</option>
+            </optgroup>
         </select>
         <span v-if="hint && !error" :id="`${uid}-note`" class="mt-1 block text-xs text-slate-500">{{ hint }}</span>
         <span v-if="error" :id="`${uid}-note`" class="mt-1 block text-xs text-red-600">{{ error }}</span>

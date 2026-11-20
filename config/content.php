@@ -9,12 +9,10 @@ return [
     // "Automatic" deadline = publish date minus this many hours.
     'deadline_hours' => 24,
 
-    'caption_limit' => 2200,
     'max_tags' => 30,
-    'max_references' => 10,
+    'max_references' => 15,
 
-    // Suggestions shown in the Content Pillar / Format fields (people may still type their own).
-    'pillars' => ['Educational', 'Promotional', 'Entertaining', 'Inspirational', 'Community', 'Product'],
-    'formats' => ['Photo', 'Illustration', 'Infographic', 'Quote', 'Video', 'Motion graphic', 'Testimonial', 'Tutorial', 'Behind the scenes', 'Announcement'],
+    // Suggestions for the "category" field of a knowledge base entry (people may type their own).
+    'knowledge_categories' => ['Brand story', 'Tone of voice', 'Target audience', 'Guidelines', 'FAQ', 'Competitors', 'Other'],
 
 ];

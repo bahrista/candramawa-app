@@ -5,28 +5,29 @@ import AppLayout from '../../Layouts/AppLayout.vue';
 import Avatar from '../../Components/Avatar.vue';
 import BrandLogo from '../../Components/BrandLogo.vue';
 import StatusBadge from '../../Components/StatusBadge.vue';
-import PostTypeIcon from '../../Components/ContentPlan/PostTypeIcon.vue';
+import PlatformIcon from '../../Components/ContentPlan/PlatformIcon.vue';
+import { flattenTypes } from '../../lib/contentTypes';
 
 const props = defineProps({
     plans: Object,
     filters: Object,
     counts: Object,
     statuses: Array,
-    postTypes: Array,
+    contentTypes: Array,
     brands: Array,
 });
 
 const f = reactive({
     search: props.filters.search,
     brand: props.filters.brand ?? '',
-    post_type: props.filters.post_type ?? '',
+    content_type: props.filters.content_type ?? '',
     from: props.filters.from ?? '',
     to: props.filters.to ?? '',
     mine: props.filters.mine,
 });
 watch(
     () => props.filters,
-    (n) => Object.assign(f, { search: n.search, brand: n.brand ?? '', post_type: n.post_type ?? '', from: n.from ?? '', to: n.to ?? '', mine: n.mine }),
+    (n) => Object.assign(f, { search: n.search, brand: n.brand ?? '', content_type: n.content_type ?? '', from: n.from ?? '', to: n.to ?? '', mine: n.mine }),
 );
 
 function visit(extra = {}) {
@@ -44,7 +45,7 @@ const searchLater = () => {
 const sortBy = (key) => visit({ sort: key, dir: props.filters.sort === key && props.filters.dir === 'asc' ? 'desc' : key === 'title' ? 'asc' : props.filters.sort === key ? 'asc' : 'desc' });
 const arrow = (key) => (props.filters.sort === key ? (props.filters.dir === 'asc' ? ' ▲' : ' ▼') : '');
 
-const hasFilters = () => f.search || f.brand || f.post_type || f.from || f.to || f.mine || props.filters.status;
+const hasFilters = () => f.search || f.brand || f.content_type || f.from || f.to || f.mine || props.filters.status;
 
 const remove = (plan) => {
     if (window.confirm(`Delete the draft "${plan.title}"? This cannot be undone.`)) router.delete(`/content-plans/${plan.id}`, { preserveScroll: true });
@@ -53,7 +54,21 @@ const remove = (plan) => {
 // "Sat, 5 Dec 2026 · 19:30" -> date on one line, time under it.
 const split = (label) => (label ? label.split(' · ') : []);
 
-const postTypeLabel = (value) => props.postTypes.find((t) => t.value === value)?.label ?? value;
+const flat = flattenTypes(props.contentTypes);
+const typeOf = (key) => flat[key];
+
+// One pill per platform: its icon, and the type's name (or how many types when there are several).
+// The tooltip lists them, so the column stays short however many content types there are.
+function byPlatform(keys) {
+    const groups = new Map();
+    for (const key of keys) {
+        const t = typeOf(key);
+        if (!t) continue;
+        if (!groups.has(t.platform)) groups.set(t.platform, { platform: t.platform, label: t.platform_label, types: [] });
+        groups.get(t.platform).types.push(t);
+    }
+    return [...groups.values()];
+}
 const input = 'rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500';
 </script>
 
@@ -87,9 +102,11 @@ const input = 'rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm
                 <option value="">All brands</option>
                 <option v-for="b in brands" :key="b.id" :value="b.id">{{ b.name }}</option>
             </select>
-            <select v-model="f.post_type" :class="input" aria-label="Post type" @change="visit()">
-                <option value="">All post types</option>
-                <option v-for="t in postTypes" :key="t.value" :value="t.value">{{ t.label }}</option>
+            <select v-model="f.content_type" :class="input" aria-label="Content type" @change="visit()">
+                <option value="">All content types</option>
+                <optgroup v-for="p in contentTypes" :key="p.key" :label="p.label">
+                    <option v-for="t in p.types" :key="t.key" :value="t.key">{{ t.full_label }}</option>
+                </optgroup>
             </select>
             <label class="flex items-center gap-1.5 text-sm text-slate-600">
                 Publish from <input v-model="f.from" type="date" :class="input" @change="visit()" />
@@ -109,7 +126,7 @@ const input = 'rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm
                     <tr>
                         <th class="min-w-[13rem] px-3 py-2.5"><button type="button" class="font-semibold uppercase hover:text-slate-800" @click="sortBy('title')">Content{{ arrow('title') }}</button></th>
                         <th class="px-3 py-2.5">Brand</th>
-                        <th class="px-3 py-2.5">Post type</th>
+                        <th class="px-3 py-2.5">Content type</th>
                         <th class="px-3 py-2.5"><button type="button" class="font-semibold uppercase hover:text-slate-800" @click="sortBy('publish')">Publish{{ arrow('publish') }}</button></th>
                         <th class="px-3 py-2.5"><button type="button" class="font-semibold uppercase hover:text-slate-800" @click="sortBy('deadline')">Deadline{{ arrow('deadline') }}</button></th>
                         <th class="px-3 py-2.5">Status</th>
@@ -121,7 +138,7 @@ const input = 'rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm
                     <tr v-for="p in plans.data" :key="p.id" class="border-t border-[#f0f0f1] align-top hover:bg-[#f6f7f7]">
                         <td class="min-w-[13rem] px-3 py-3">
                             <Link :href="`/content-plans/${p.id}`" class="font-medium text-indigo-600 hover:underline">{{ p.title }}</Link>
-                            <div v-if="p.content_pillar || p.format" class="mt-0.5 text-xs text-slate-500">{{ [p.content_pillar, p.format].filter(Boolean).join(' · ') }}</div>
+                            <div v-if="p.content_pillar" class="mt-0.5 text-xs text-slate-500">{{ p.content_pillar }}</div>
                         </td>
                         <td class="px-3 py-3">
                             <div v-if="p.brand" class="flex items-center gap-2">
@@ -130,8 +147,16 @@ const input = 'rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-sm
                             </div>
                         </td>
                         <td class="px-3 py-3">
-                            <div v-if="p.post_types.length" class="flex gap-1.5 text-slate-600">
-                                <span v-for="t in p.post_types" :key="t" :title="postTypeLabel(t)"><PostTypeIcon :type="t" :size="20" /></span>
+                            <div v-if="p.content_types.length" class="flex flex-wrap items-center gap-1.5">
+                                <span
+                                    v-for="g in byPlatform(p.content_types)"
+                                    :key="g.platform"
+                                    :title="`${g.label}: ${g.types.map((t) => t.label).join(', ')}`"
+                                    class="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-700"
+                                >
+                                    <PlatformIcon :platform="g.platform" :size="14" />
+                                    {{ g.types.length === 1 ? g.types[0].label : g.types.length }}
+                                </span>
                             </div>
                             <span v-else class="text-slate-400">—</span>
                         </td>

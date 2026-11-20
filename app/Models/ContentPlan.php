@@ -2,8 +2,9 @@
 
 namespace App\Models;
 
+use App\Enums\BrandRole;
 use App\Enums\ContentStatus;
-use App\Enums\PostType;
+use App\Support\ContentTypes;
 use Database\Factories\ContentPlanFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Builder;
@@ -15,7 +16,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 // status, content_manager_id, publish_at, deadline_at and the workflow timestamps are
 // intentionally NOT mass assignable; the controller sets them explicitly.
 #[Fillable([
-    'brand_id', 'title', 'content_pillar', 'format', 'brief', 'reference_links', 'deadline_mode',
+    'brand_id', 'title', 'content_pillar_id', 'brief', 'brief_references', 'deadline_mode',
     'multimedia_creator_id', 'copywriter_id', 'publisher_id',
 ])]
 class ContentPlan extends Model
@@ -35,7 +36,7 @@ class ContentPlan extends Model
             'status' => ContentStatus::class,
             'publish_at' => 'datetime',
             'deadline_at' => 'datetime',
-            'reference_links' => 'array',
+            'brief_references' => 'array',
             'production_started_at' => 'datetime',
             'review_submitted_at' => 'datetime',
         ];
@@ -44,6 +45,11 @@ class ContentPlan extends Model
     public function brand(): BelongsTo
     {
         return $this->belongsTo(Brand::class);
+    }
+
+    public function contentPillar(): BelongsTo
+    {
+        return $this->belongsTo(BrandContentPillar::class, 'content_pillar_id');
     }
 
     public function contentManager(): BelongsTo
@@ -72,8 +78,8 @@ class ContentPlan extends Model
     }
 
     /**
-     * Superadmins see everything. Everyone else sees plans they manage, plus plans they
-     * are assigned to once those have left the draft stage.
+     * Superadmins see everything. Everyone else sees the plans they manage, plus (once a plan has
+     * left the draft stage) plans they are assigned to and every plan of a brand they belong to.
      */
     public function scopeVisibleTo(Builder $query, User $user): Builder
     {
@@ -87,7 +93,9 @@ class ContentPlan extends Model
                     $q->where('status', '!=', ContentStatus::Draft->value)
                         ->where(fn (Builder $q) => $q->where('multimedia_creator_id', $user->id)
                             ->orWhere('copywriter_id', $user->id)
-                            ->orWhere('publisher_id', $user->id));
+                            ->orWhere('publisher_id', $user->id)
+                            ->orWhereIn('brand_id', BrandMember::query()->select('brand_id')->where('user_id', $user->id))
+                            ->orWhereIn('brand_id', Brand::query()->select('id')->where('created_by', $user->id)));
                 });
         });
     }
@@ -100,9 +108,22 @@ class ContentPlan extends Model
             ->orWhere('publisher_id', $user->id));
     }
 
+    /** The people who run this plan: Superadmin and the content manager (the creator). */
     public function isManagedBy(User $user): bool
     {
         return $user->isSuperadmin() || $this->content_manager_id === $user->id;
+    }
+
+    /** The brand's creator and Brand Owners may review and manage a plan once it has left draft. */
+    public function isReviewedBy(User $user): bool
+    {
+        if ($this->status === ContentStatus::Draft) {
+            return false;
+        }
+
+        $brand = $this->brand;
+
+        return $brand->created_by === $user->id || $brand->hasMember($user, BrandRole::BrandOwner);
     }
 
     public function isAssignee(User $user): bool
@@ -117,12 +138,10 @@ class ContentPlan extends Model
             && in_array($this->status, [ContentStatus::Draft, ContentStatus::InProduction], true);
     }
 
-    /** @return list<string> selected post type values in their canonical order */
-    public function postTypeValues(): array
+    /** @return list<string> the content types picked for this plan, in the order of config/content_types.php */
+    public function contentTypeKeys(): array
     {
-        $have = $this->posts->map(fn (ContentPlanPost $p) => $p->post_type->value)->all();
-
-        return array_values(array_filter(PostType::values(), fn ($v) => in_array($v, $have, true)));
+        return ContentTypes::order($this->posts->pluck('content_type')->all());
     }
 
     /** Moves the plan along the workflow. 'save' leaves the status alone. */

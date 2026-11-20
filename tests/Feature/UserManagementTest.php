@@ -237,4 +237,38 @@ class UserManagementTest extends TestCase
         $this->post('/profile/sessions/others', ['current_password' => 'secret123'])->assertSessionHas('success');
         $this->assertDatabaseMissing('sessions', ['id' => 'other1']);
     }
+
+    public function test_repeated_wrong_passwords_lock_that_username_for_a_while_with_a_clear_message(): void
+    {
+        User::factory()->create(['username' => 'ani', 'password' => 'secret123']);
+        User::factory()->create(['username' => 'budi', 'password' => 'secret123']);
+
+        for ($i = 0; $i < 5; $i++) {
+            $this->post('/login', ['username' => 'ani', 'password' => 'wrong'])->assertSessionHasErrors('username');
+        }
+
+        // even the right password is refused now, and the message says why
+        $this->post('/login', ['username' => 'ani', 'password' => 'secret123'])->assertSessionHasErrors('username');
+        $this->assertStringStartsWith('Too many login attempts', session('errors')->first('username'));
+        $this->assertGuest();
+
+        // ... but a colleague on the same IP address is not affected
+        $this->post('/login', ['username' => 'budi', 'password' => 'secret123'])->assertRedirect('/');
+        $this->assertAuthenticated();
+    }
+
+    public function test_a_successful_login_resets_the_failed_attempt_count(): void
+    {
+        User::factory()->create(['username' => 'ani', 'password' => 'secret123']);
+
+        for ($round = 0; $round < 3; $round++) {
+            for ($i = 0; $i < 4; $i++) {
+                $this->post('/login', ['username' => 'ani', 'password' => 'wrong']);
+            }
+            $this->post('/login', ['username' => 'ani', 'password' => 'secret123'])->assertRedirect('/');
+            auth()->logout();
+        }
+
+        $this->assertGuest();
+    }
 }

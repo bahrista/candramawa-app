@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { parseDriveLink } from '../../lib/drive';
 
 const props = defineProps({
@@ -7,10 +7,19 @@ const props = defineProps({
     // 'thumb' shows the still image Drive generates; 'frame' shows Drive's own viewer (video, private files).
     mode: { type: String, default: 'thumb' },
     fit: { type: String, default: 'cover' },
+    // Small tiles never load Drive's heavy viewer: they show a plain placeholder instead.
+    frameFallback: { type: Boolean, default: true },
 });
 const emit = defineEmits(['update:mode']);
 
 const link = computed(() => parseDriveLink(props.url));
+const failed = ref(false);
+watch(() => props.url, () => (failed.value = false));
+
+function onError() {
+    if (props.frameFallback) emit('update:mode', 'frame');
+    else failed.value = true;
+}
 </script>
 
 <template>
@@ -26,6 +35,7 @@ const link = computed(() => parseDriveLink(props.url));
                 referrerpolicy="no-referrer"
                 :title="link.kind === 'folder' ? 'Google Drive folder' : 'Google Drive file'"
             />
+            <div v-else-if="failed" class="flex h-full w-full items-center justify-center px-1 text-center text-[10px] leading-tight text-slate-500">No preview</div>
             <img
                 v-else
                 :key="link.id"
@@ -34,7 +44,7 @@ const link = computed(() => parseDriveLink(props.url));
                 referrerpolicy="no-referrer"
                 class="h-full w-full"
                 :class="fit === 'contain' ? 'object-contain' : 'object-cover'"
-                @error="emit('update:mode', 'frame')"
+                @error="onError"
             />
         </template>
 

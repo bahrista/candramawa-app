@@ -27,9 +27,11 @@ test('builds embed URLs from the ID only', () => {
     assert.equal(file.previewUrl, `https://drive.google.com/file/d/${ID}/preview`);
     assert.equal(file.thumbUrl, `https://drive.google.com/thumbnail?id=${ID}&sz=w1080`);
     assert.equal(file.openUrl, `https://drive.google.com/file/d/${ID}/view`);
+    assert.equal(file.downloadUrl, `https://drive.google.com/uc?export=download&id=${ID}`);
 
     const folder = parseDriveLink(`https://drive.google.com/drive/folders/${ID}`);
     assert.equal(folder.previewUrl, `https://drive.google.com/embeddedfolderview?id=${ID}#grid`);
+    assert.equal(folder.downloadUrl, null); // a folder cannot be downloaded in one go
 });
 
 test('rejects everything else', () => {

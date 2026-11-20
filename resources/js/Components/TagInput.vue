@@ -28,7 +28,8 @@ function commit() {
         if (tag && next.length < props.max && !next.some((t) => t.toLowerCase() === tag.toLowerCase())) next.push(tag);
     }
     draft.value = '';
-    emit('update:modelValue', next);
+    // a plain blur with nothing typed must not write anything
+    if (next.length !== props.modelValue.length) emit('update:modelValue', next);
 }
 
 function onKeydown(e) {

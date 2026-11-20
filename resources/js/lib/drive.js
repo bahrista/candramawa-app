@@ -12,6 +12,8 @@ function build(kind, id) {
                 ? `https://drive.google.com/embeddedfolderview?id=${id}#grid`
                 : `https://drive.google.com/file/d/${id}/preview`,
         thumbUrl: `https://drive.google.com/thumbnail?id=${id}&sz=w1080`,
+        // Files can be downloaded straight away; a folder can only be opened (Drive zips it on its own page).
+        downloadUrl: kind === 'folder' ? null : `https://drive.google.com/uc?export=download&id=${id}`,
         openUrl:
             kind === 'folder'
                 ? `https://drive.google.com/drive/folders/${id}`

@@ -8,6 +8,7 @@ const props = defineProps({
     form: Object,
     existingLogoUrl: { type: String, default: null },
     submitLabel: { type: String, default: 'Save' },
+    cancelHref: { type: String, default: '/brands' },
 });
 const emit = defineEmits(['submit']);
 
@@ -78,7 +79,7 @@ const clearLogo = () => {
 
         <div class="flex gap-3">
             <button class="rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50" :disabled="form.processing">{{ submitLabel }}</button>
-            <Link href="/brands" class="px-3 py-2 text-sm text-slate-600">Cancel</Link>
+            <Link :href="cancelHref" class="px-3 py-2 text-sm text-slate-600">Cancel</Link>
         </div>
     </form>
 </template>

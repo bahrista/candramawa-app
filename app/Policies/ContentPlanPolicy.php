@@ -7,36 +7,44 @@ use App\Models\ContentPlan;
 use App\Models\User;
 
 /**
- * Draft: only the content manager (and Superadmin) can see and change it.
- * In production: assigned people can also see it and fill in the post details.
- * In review: assigned people can see it; only the content manager (or Superadmin) can change it.
+ * Draft: only the content manager (the creator) and Superadmin can see and change it.
+ * Once submitted, the brand's creator and Brand Owners can review and manage it, assigned
+ * people can see it (and fill in the post details while it is in production), and every
+ * member of the brand's team can see it.
  */
 class ContentPlanPolicy
 {
+    /** Full control: Superadmin, the content manager, and (after draft) the brand's reviewers. */
+    public function manage(User $user, ContentPlan $plan): bool
+    {
+        return $plan->isManagedBy($user) || $plan->isReviewedBy($user);
+    }
+
     public function view(User $user, ContentPlan $plan): bool
     {
-        if ($plan->isManagedBy($user)) {
+        if ($this->manage($user, $plan)) {
             return true;
         }
 
-        return $plan->status !== ContentStatus::Draft && $plan->isAssignee($user);
+        return $plan->status !== ContentStatus::Draft
+            && ($plan->isAssignee($user) || $plan->brand->hasMember($user));
     }
 
     public function editBrief(User $user, ContentPlan $plan): bool
     {
-        return $plan->isManagedBy($user);
+        return $this->manage($user, $plan);
     }
 
     public function editPosts(User $user, ContentPlan $plan): bool
     {
-        return $plan->isManagedBy($user)
+        return $this->manage($user, $plan)
             || ($plan->isAssignee($user) && $plan->status === ContentStatus::InProduction);
     }
 
     /** Only drafts can be deleted, and only by their manager. */
     public function delete(User $user, ContentPlan $plan): bool
     {
-        return $plan->isManagedBy($user) && $plan->status === ContentStatus::Draft;
+        return $plan->status === ContentStatus::Draft && $plan->isManagedBy($user);
     }
 
     /** May this user press this button on this plan right now? */
@@ -46,7 +54,7 @@ class ContentPlanPolicy
             return false;
         }
 
-        $manages = $plan->isManagedBy($user);
+        $manages = $this->manage($user, $plan);
 
         return match ($action) {
             'save' => $this->editPosts($user, $plan),

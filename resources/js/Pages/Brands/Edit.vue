@@ -20,6 +20,6 @@ const submit = () => form.post(`/brands/${props.brand.id}`, { forceFormData: tru
     <Head title="Edit brand" />
     <AppLayout>
         <h1 class="mb-6 text-2xl font-semibold">Edit {{ brand.name }}</h1>
-        <BrandForm :form="form" :existing-logo-url="brand.logo_url" submit-label="Save changes" @submit="submit" />
+        <BrandForm :form="form" :existing-logo-url="brand.logo_url" submit-label="Save changes" :cancel-href="`/brands/${brand.id}`" @submit="submit" />
     </AppLayout>
 </template>

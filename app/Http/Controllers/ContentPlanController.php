@@ -2,13 +2,17 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\BrandRole;
 use App\Enums\ContentStatus;
-use App\Enums\PostType;
 use App\Http\Requests\ContentPlanRequest;
 use App\Models\Brand;
+use App\Models\BrandKnowledgeItem;
+use App\Models\BrandProduct;
 use App\Models\ContentPlan;
 use App\Models\User;
+use App\Support\ContentTypes;
 use App\Support\LocalTime;
+use App\Support\Present;
 use Illuminate\Contracts\Database\Eloquent\Builder as BuilderContract;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -23,6 +27,9 @@ class ContentPlanController extends Controller
         'deadline' => 'deadline_at',
         'title' => 'title',
     ];
+
+    /** Share links open the plan on the tab that suits whoever it was shared with. */
+    private const VIEWS = ['production', 'approval', 'publisher'];
 
     public function index(Request $request): Response
     {
@@ -41,7 +48,8 @@ class ContentPlanController extends Controller
             ->when($filters['status'], fn ($q, $status) => $q->where('status', $status))
             ->with([
                 'brand',
-                'posts:id,content_plan_id,post_type',
+                'contentPillar:id,name',
+                'posts:id,content_plan_id,content_type',
                 'contentManager:id,name,avatar_path,updated_at',
                 'multimediaCreator:id,name,avatar_path,updated_at',
                 'copywriter:id,name,avatar_path,updated_at',
@@ -62,7 +70,7 @@ class ContentPlanController extends Controller
                 ...collect(ContentStatus::cases())->mapWithKeys(fn ($s) => [$s->value => (int) ($counts[$s->value] ?? 0)])->all(),
             ],
             'statuses' => collect(ContentStatus::cases())->map(fn ($s) => ['value' => $s->value, 'label' => $s->label()])->all(),
-            'postTypes' => $this->postTypeOptions(),
+            'contentTypes' => ContentTypes::tree(),
             'brands' => Brand::query()
                 ->whereIn('id', ContentPlan::query()->visibleTo($user)->select('brand_id'))
                 ->orderBy('name')->get(['id', 'name'])->all(),
@@ -71,7 +79,11 @@ class ContentPlanController extends Controller
 
     public function create(Request $request): Response
     {
-        return Inertia::render('ContentPlans/Editor', $this->editorProps($request->user(), null));
+        $brand = $request->query('brand');
+
+        return Inertia::render('ContentPlans/Editor', $this->editorProps(
+            $request->user(), null, null, is_scalar($brand) && ctype_digit((string) $brand) ? (int) $brand : null,
+        ));
     }
 
     public function store(ContentPlanRequest $request): RedirectResponse
@@ -93,7 +105,11 @@ class ContentPlanController extends Controller
     {
         $this->authorize('view', $contentPlan);
 
-        return Inertia::render('ContentPlans/Editor', $this->editorProps($request->user(), $contentPlan));
+        $view = $request->query('view');
+
+        return Inertia::render('ContentPlans/Editor', $this->editorProps(
+            $request->user(), $contentPlan, is_string($view) && in_array($view, self::VIEWS, true) ? $view : null,
+        ));
     }
 
     public function update(ContentPlanRequest $request, ContentPlan $contentPlan): RedirectResponse
@@ -124,10 +140,15 @@ class ContentPlanController extends Controller
         DB::transaction(function () use ($request, $plan, $data) {
             if ($request->canEditBrief()) {
                 $plan->fill(collect($data)->only([
-                    'brand_id', 'title', 'content_pillar', 'format', 'brief', 'deadline_mode',
+                    'brand_id', 'title', 'content_pillar_id', 'brief', 'deadline_mode',
                     'multimedia_creator_id', 'copywriter_id', 'publisher_id',
                 ])->all());
-                $plan->reference_links = $data['reference_links'] ?? [];
+                $plan->brief_references = array_map(
+                    fn (array $r) => $r['kind'] === 'link'
+                        ? ['kind' => 'link', 'url' => $r['url']]
+                        : ['kind' => $r['kind'], 'id' => (int) $r['id']],
+                    $data['brief_references'] ?? [],
+                );
                 $plan->publish_at = LocalTime::fromInput($data['publish_at'] ?? null);
                 $plan->deadline_at = $data['deadline_mode'] === ContentPlan::DEADLINE_AUTO
                     ? $plan->publish_at?->subHours(config('content.deadline_hours'))
@@ -138,16 +159,16 @@ class ContentPlanController extends Controller
             $plan->save();
 
             $types = $request->canEditBrief()
-                ? array_values(array_filter(PostType::values(), fn ($v) => in_array($v, $data['post_types'] ?? [], true)))
-                : $plan->postTypeValues();
+                ? ContentTypes::order($data['content_types'] ?? [])
+                : $plan->contentTypeKeys();
 
-            $plan->posts()->whereNotIn('post_type', $types)->delete();
+            $plan->posts()->whereNotIn('content_type', $types)->delete();
 
-            foreach ($types as $value) {
-                $post = $plan->posts()->firstOrNew(['post_type' => $value]);
+            foreach ($types as $key) {
+                $post = $plan->posts()->firstOrNew(['content_type' => $key]);
 
                 if ($request->canEditPosts()) {
-                    $input = $data['posts'][$value] ?? [];
+                    $input = $data['posts'][$key] ?? [];
                     $post->media_links = $input['media_links'] ?? [];
                     $post->caption = $input['caption'] ?? null;
                     $post->tags = $input['tags'] ?? [];
@@ -183,7 +204,7 @@ class ContentPlanController extends Controller
             'search' => $text('search'),
             'brand' => ctype_digit($text('brand')) ? (int) $text('brand') : null,
             'status' => ContentStatus::tryFrom($text('status'))?->value,
-            'post_type' => PostType::tryFrom($text('post_type'))?->value,
+            'content_type' => ContentTypes::find($text('content_type'))['key'] ?? null,
             'from' => $this->ymd($text('from')),
             'to' => $this->ymd($text('to')),
             'mine' => $request->boolean('mine'),
@@ -210,7 +231,7 @@ class ContentPlanController extends Controller
                     ->orWhereHas('brand', fn ($b) => $b->where('name', 'like', $like)));
             })
             ->when($f['brand'], fn ($q, $id) => $q->where('brand_id', $id))
-            ->when($f['post_type'], fn ($q, $type) => $q->whereHas('posts', fn ($p) => $p->where('post_type', $type)))
+            ->when($f['content_type'], fn ($q, $type) => $q->whereHas('posts', fn ($p) => $p->where('content_type', $type)))
             ->when($f['from'], fn ($q, $day) => $q->where('publish_at', '>=', LocalTime::startOfDay($day)))
             ->when($f['to'], fn ($q, $day) => $q->where('publish_at', '<=', LocalTime::endOfDay($day)))
             ->when($f['mine'], fn ($q) => $q->involving($user));
@@ -222,20 +243,19 @@ class ContentPlanController extends Controller
         return [
             'id' => $plan->id,
             'title' => $plan->title,
-            'content_pillar' => $plan->content_pillar,
-            'format' => $plan->format,
+            'content_pillar' => $plan->contentPillar?->name,
             'status' => $plan->status->value,
             'status_label' => $plan->status->label(),
-            'brand' => $this->brandSummary($plan->brand),
-            'post_types' => $plan->postTypeValues(),
+            'brand' => Present::brand($plan->brand),
+            'content_types' => $plan->contentTypeKeys(),
             'publish_label' => LocalTime::label($plan->publish_at),
             'deadline_label' => LocalTime::label($plan->deadline_at),
             'is_overdue' => $plan->isOverdue(),
             'team' => array_filter([
-                'Content Manager' => $this->person($plan->contentManager),
-                'Multimedia Creator' => $this->person($plan->multimediaCreator),
-                'Copy Writer' => $this->person($plan->copywriter),
-                'Publisher' => $this->person($plan->publisher),
+                'Content Manager' => Present::person($plan->contentManager),
+                'Multimedia Creator' => Present::person($plan->multimediaCreator),
+                'Copy Writer' => Present::person($plan->copywriter),
+                'Publisher' => Present::person($plan->publisher),
             ]),
             'can_delete' => $user->can('delete', $plan),
         ];
@@ -244,16 +264,17 @@ class ContentPlanController extends Controller
     // ---- editor page -----------------------------------------------------------------
 
     /** @return array<string, mixed> */
-    private function editorProps(User $user, ?ContentPlan $plan): array
+    private function editorProps(User $user, ?ContentPlan $plan, ?string $view = null, ?int $prefillBrand = null): array
     {
-        $brands = $user->isSuperadmin()
-            ? Brand::query()->orderBy('name')->get()
-            : Brand::query()->where('created_by', $user->id)->orderBy('name')->get();
+        $brands = Brand::query()->creatableBy($user)->orderBy('name')->get();
 
-        // Keep the plan's own brand selectable even if it is not one of "my" brands.
+        // Keep the plan's own brand selectable even if the viewer cannot plan content for it
+        // (for example someone who is only the multimedia creator).
         if ($plan !== null && ! $brands->contains('id', $plan->brand_id)) {
             $brands->push($plan->brand);
         }
+
+        $brands->load(['pillars', 'members.user', 'knowledgeItems', 'products']);
 
         $abilities = $plan === null
             ? ['editBrief' => true, 'editPosts' => true, 'actions' => ['save', 'production', 'review'], 'canDelete' => false]
@@ -264,42 +285,53 @@ class ContentPlanController extends Controller
                 'canDelete' => $user->can('delete', $plan),
             ];
 
-        $pillarsByBrand = ContentPlan::query()->visibleTo($user)
-            ->whereNotNull('content_pillar')->select('brand_id', 'content_pillar')->distinct()->get()
-            ->groupBy('brand_id')->map(fn ($rows) => $rows->pluck('content_pillar')->sort()->values()->all());
-
         return [
             'plan' => $plan ? $this->present($plan) : null,
-            'brands' => $brands->map(fn (Brand $b) => $this->brandSummary($b))->values()->all(),
-            'users' => User::query()->where('is_active', true)->orderBy('name')
-                ->get(['id', 'name', 'job_title', 'avatar_path', 'updated_at'])
-                ->map(fn (User $u) => $this->person($u) + ['job_title' => $u->job_title])->all(),
-            'contentManager' => $this->person($plan?->contentManager ?? $user),
-            'postTypes' => $this->postTypeOptions(),
+            'brands' => $brands->map(fn (Brand $b) => $this->editorBrand($b, $plan, $user))->values()->all(),
+            'prefillBrandId' => $prefillBrand !== null && $brands->contains('id', $prefillBrand) ? $prefillBrand : null,
+            'contentManager' => Present::person($plan?->contentManager ?? $user),
+            'contentTypes' => ContentTypes::tree(),
             'abilities' => $abilities,
-            'suggestions' => [
-                'formats' => config('content.formats'),
-                'pillars' => config('content.pillars'),
-                'pillarsByBrand' => (object) $pillarsByBrand->all(),
-            ],
-            'limits' => [
-                'caption' => config('content.caption_limit'),
-                'tags' => config('content.max_tags'),
-                'references' => config('content.max_references'),
-            ],
+            'view' => $view,
+            'limits' => ['tags' => config('content.max_tags'), 'references' => config('content.max_references')],
             'timezone' => ['name' => config('content.timezone'), 'abbr' => LocalTime::abbreviation()],
             'deadlineHours' => config('content.deadline_hours'),
+        ];
+    }
+
+    /** A brand with everything the form needs to offer: pillars, team and reference material. */
+    private function editorBrand(Brand $brand, ?ContentPlan $plan, User $user): array
+    {
+        $team = fn (BrandRole $role) => $brand->members
+            ->filter(fn ($m) => $m->role === $role && $m->user?->is_active)
+            ->unique('user_id')
+            ->map(fn ($m) => Present::person($m->user))
+            ->values()->all();
+
+        return Present::brand($brand) + [
+            'can_manage' => $user->can('manageAssets', $brand),
+            'pillars' => $brand->pillars
+                ->filter(fn ($p) => ! $p->isArchived() || $p->id === $plan?->content_pillar_id)
+                ->map(fn ($p) => ['id' => $p->id, 'name' => $p->name, 'archived' => $p->isArchived()])
+                ->values()->all(),
+            'team' => [
+                'multimedia_creator' => $team(BrandRole::MultimediaCreator),
+                'copywriter' => $team(BrandRole::Copywriter),
+                'publisher' => $team(BrandRole::Publisher),
+            ],
+            'knowledge' => $brand->knowledgeItems->map(fn ($k) => ['id' => $k->id, 'title' => $k->title, 'category' => $k->category])->values()->all(),
+            'products' => $brand->products->where('is_active', true)->map(fn ($p) => ['id' => $p->id, 'name' => $p->name, 'type' => $p->type])->values()->all(),
         ];
     }
 
     /** @return array<string, mixed> */
     private function present(ContentPlan $plan): array
     {
-        $plan->loadMissing('posts');
+        $plan->loadMissing('posts', 'multimediaCreator', 'copywriter', 'publisher');
 
         $posts = [];
         foreach ($plan->posts as $post) {
-            $posts[$post->post_type->value] = [
+            $posts[$post->content_type] = [
                 'media_links' => $post->media_links ?? [],
                 'caption' => $post->caption ?? '',
                 'tags' => $post->tags ?? [],
@@ -311,17 +343,24 @@ class ContentPlanController extends Controller
             'id' => $plan->id,
             'brand_id' => $plan->brand_id,
             'title' => $plan->title,
-            'content_pillar' => $plan->content_pillar ?? '',
-            'format' => $plan->format ?? '',
-            'post_types' => $plan->postTypeValues(),
+            'content_pillar_id' => $plan->content_pillar_id,
+            'content_types' => $plan->contentTypeKeys(),
             'publish_at' => LocalTime::toInput($plan->publish_at) ?? '',
+            'publish_label' => LocalTime::label($plan->publish_at),
             'deadline_mode' => $plan->deadline_mode,
             'deadline_at' => LocalTime::toInput($plan->deadline_at) ?? '',
+            'deadline_label' => LocalTime::label($plan->deadline_at),
             'multimedia_creator_id' => $plan->multimedia_creator_id,
             'copywriter_id' => $plan->copywriter_id,
             'publisher_id' => $plan->publisher_id,
+            // Whoever is assigned now, so the form can still show them if they left the brand team.
+            'assignees' => [
+                'multimedia_creator_id' => Present::person($plan->multimediaCreator),
+                'copywriter_id' => Present::person($plan->copywriter),
+                'publisher_id' => Present::person($plan->publisher),
+            ],
             'brief' => $plan->brief ?? '',
-            'reference_links' => $plan->reference_links ?? [],
+            'brief_references' => $this->resolveReferences($plan),
             'status' => $plan->status->value,
             'status_label' => $plan->status->label(),
             'production_started_label' => LocalTime::label($plan->production_started_at),
@@ -330,28 +369,40 @@ class ContentPlanController extends Controller
         ];
     }
 
-    /** @return list<array<string, mixed>> */
-    private function postTypeOptions(): array
+    /**
+     * Links stay as typed. Knowledge base entries and products are stored by id and shown with
+     * their current title and share link, so renaming an entry updates every brief that uses it.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function resolveReferences(ContentPlan $plan): array
     {
-        return array_map(fn (PostType $t) => [
-            'value' => $t->value,
-            'label' => $t->label(),
-            'multiple' => $t->multipleMedia(),
-            'minMedia' => $t->minMedia(),
-            'maxMedia' => $t->maxMedia(),
-            'captionRequired' => $t->captionRequired(),
-        ], PostType::cases());
-    }
+        $items = array_map(
+            fn ($item) => is_string($item) ? ['kind' => 'link', 'url' => $item] : $item,
+            $plan->brief_references ?? [],
+        );
 
-    /** @return array<string, mixed>|null */
-    private function brandSummary(?Brand $brand): ?array
-    {
-        return $brand ? ['id' => $brand->id, 'name' => $brand->name, 'color' => $brand->color, 'logo_url' => $brand->logoUrl()] : null;
-    }
+        $ids = fn (string $kind) => collect($items)->where('kind', $kind)->pluck('id')->all();
 
-    /** @return array<string, mixed>|null */
-    private function person(?User $user): ?array
-    {
-        return $user ? ['id' => $user->id, 'name' => $user->name, 'avatar_url' => $user->avatarUrl()] : null;
+        $sources = [
+            'knowledge' => BrandKnowledgeItem::query()->where('brand_id', $plan->brand_id)->whereIn('id', $ids('knowledge'))->get()->keyBy('id'),
+            'product' => BrandProduct::query()->where('brand_id', $plan->brand_id)->whereIn('id', $ids('product'))->get()->keyBy('id'),
+        ];
+
+        return array_map(function (array $item) use ($sources) {
+            if (($item['kind'] ?? 'link') === 'link') {
+                return ['kind' => 'link', 'url' => $item['url'], 'label' => null];
+            }
+
+            $model = $sources[$item['kind']][$item['id']] ?? null;
+
+            return [
+                'kind' => $item['kind'],
+                'id' => $item['id'],
+                'label' => $model ? ($item['kind'] === 'knowledge' ? $model->title : $model->name) : 'Removed entry',
+                'url' => $model?->shareUrl(),
+                'missing' => $model === null,
+            ];
+        }, $items);
     }
 }

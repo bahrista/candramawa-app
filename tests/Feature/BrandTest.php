@@ -40,7 +40,7 @@ class BrandTest extends TestCase
 
         $this->actingAs($u)->post('/brands', [
             'name' => '  Kopi Senja ', 'description' => 'Coffee', 'color' => '#FF8800',
-        ])->assertRedirect('/brands');
+        ])->assertRedirect('/brands/'.Brand::first()->id.'?tab=team');
 
         $b = Brand::first();
         $this->assertSame('Kopi Senja', $b->name);
@@ -97,7 +97,7 @@ class BrandTest extends TestCase
 
         $this->actingAs($owner)->post("/brands/{$brand->id}", [
             '_method' => 'put', 'name' => 'Acme', 'logo' => UploadedFile::fake()->image('l.png'),
-        ])->assertRedirect('/brands');
+        ])->assertRedirect("/brands/{$brand->id}");
         $this->assertNotNull($brand->fresh()->logo_path);
 
         $this->actingAs($stranger);

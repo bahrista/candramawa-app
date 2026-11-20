@@ -1,11 +1,10 @@
 <script setup>
 import { ref } from 'vue';
-import { Head, Link, router, usePage } from '@inertiajs/vue3';
+import { Head, Link, router } from '@inertiajs/vue3';
 import AppLayout from '../../Layouts/AppLayout.vue';
 import BrandLogo from '../../Components/BrandLogo.vue';
 
 const props = defineProps({ brands: Object, filters: Object });
-const isSuperadmin = usePage().props.auth.user.role === 'superadmin';
 const search = ref(props.filters.search);
 const find = () => router.get('/brands', { search: search.value }, { preserveState: true, replace: true });
 </script>
@@ -27,13 +26,14 @@ const find = () => router.get('/brands', { search: search.value }, { preserveSta
                 <div class="flex items-center gap-3">
                     <BrandLogo :name="b.name" :url="b.logo_url" :color="b.color" :size="48" />
                     <div class="min-w-0">
-                        <div class="truncate font-medium">{{ b.name }}</div>
-                        <div v-if="isSuperadmin && b.creator" class="truncate text-xs text-slate-500">by {{ b.creator }}</div>
+                        <Link :href="`/brands/${b.id}`" class="block truncate font-medium text-indigo-600 hover:underline">{{ b.name }}</Link>
+                        <div v-if="b.creator" class="truncate text-xs text-slate-500">by {{ b.creator }}</div>
                     </div>
                 </div>
                 <p class="mt-3 line-clamp-3 flex-1 text-sm text-slate-600">{{ b.description || 'No description.' }}</p>
-                <div class="mt-3 text-right">
-                    <Link :href="`/brands/${b.id}/edit`" class="text-sm text-indigo-600 hover:underline">Edit</Link>
+                <div class="mt-3 flex justify-end gap-4 text-sm">
+                    <Link v-if="b.can_update" :href="`/brands/${b.id}/edit`" class="text-slate-600 hover:underline">Edit</Link>
+                    <Link :href="`/brands/${b.id}`" class="text-indigo-600 hover:underline">Open</Link>
                 </div>
             </div>
         </div>

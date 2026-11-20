@@ -6,35 +6,40 @@ import StatusBadge from '../../Components/StatusBadge.vue';
 import BriefTab from '../../Components/ContentPlan/BriefTab.vue';
 import PostDetailTab from '../../Components/ContentPlan/PostDetailTab.vue';
 import PreviewPane from '../../Components/ContentPlan/PreviewPane.vue';
+import PublishKit from '../../Components/ContentPlan/PublishKit.vue';
+import ShareMenu from '../../Components/ContentPlan/ShareMenu.vue';
+import { flattenTypes, orderKeys } from '../../lib/contentTypes';
+import { isBlank } from '../../lib/forms';
 
 const props = defineProps({
     plan: { type: Object, default: null },
     brands: Array,
-    users: Array,
+    prefillBrandId: { type: Number, default: null },
     contentManager: Object,
-    postTypes: Array,
+    contentTypes: Array, // the tree: platforms with their content types
     abilities: Object,
-    suggestions: Object,
+    view: { type: String, default: null }, // production | approval | publisher, from a share link
     limits: Object,
     timezone: Object,
     deadlineHours: Number,
 });
 
+const flat = computed(() => flattenTypes(props.contentTypes));
+
 // ---- form state -------------------------------------------------------------------------
 const posts = {};
-for (const t of props.postTypes) {
-    const saved = props.plan?.posts?.[t.value];
-    posts[t.value] = saved
+for (const key of Object.keys(flat.value)) {
+    const saved = props.plan?.posts?.[key];
+    posts[key] = saved
         ? { media_links: saved.media_links.length ? [...saved.media_links] : [''], caption: saved.caption, tags: [...saved.tags], note: saved.note }
         : { media_links: [''], caption: '', tags: [], note: '' };
 }
 
 const form = useForm({
-    brand_id: props.plan?.brand_id ?? (props.brands.length === 1 ? props.brands[0].id : null),
+    brand_id: props.plan?.brand_id ?? props.prefillBrandId ?? (props.brands.length === 1 ? props.brands[0].id : null),
     title: props.plan?.title ?? '',
-    content_pillar: props.plan?.content_pillar ?? '',
-    format: props.plan?.format ?? '',
-    post_types: [...(props.plan?.post_types ?? [])],
+    content_pillar_id: props.plan?.content_pillar_id ?? null,
+    content_types: [...(props.plan?.content_types ?? [])],
     publish_at: props.plan?.publish_at ?? '',
     deadline_mode: props.plan?.deadline_mode ?? 'auto',
     deadline_at: props.plan?.deadline_at ?? '',
@@ -42,15 +47,44 @@ const form = useForm({
     copywriter_id: props.plan?.copywriter_id ?? null,
     publisher_id: props.plan?.publisher_id ?? null,
     brief: props.plan?.brief ?? '',
-    reference_links: [...(props.plan?.reference_links ?? [])],
+    brief_references: (props.plan?.brief_references ?? []).map((r) => ({ ...r })),
     posts,
 });
 
 const status = computed(() => props.plan?.status ?? 'draft');
 const brand = computed(() => props.brands.find((b) => b.id === form.brand_id) ?? null);
-const selectedTypes = computed(() => props.postTypes.filter((t) => form.post_types.includes(t.value)));
+const selectedTypes = computed(() => form.content_types.map((k) => flat.value[k]).filter(Boolean));
+
+// ---- brand-dependent defaults -----------------------------------------------------------
+const ROLES = [
+    ['multimedia_creator_id', 'multimedia_creator'],
+    ['copywriter_id', 'copywriter'],
+    ['publisher_id', 'publisher'],
+];
+
+// Pillars and the team belong to the brand: drop what does not fit, and pre-fill a role that has exactly one person.
+function applyBrandDefaults(b) {
+    if (!b) return;
+    if (!b.pillars.some((p) => p.id === form.content_pillar_id)) form.content_pillar_id = null;
+
+    for (const [field, role] of ROLES) {
+        const team = b.team[role];
+        if (form[field] && !team.some((u) => u.id === form[field])) form[field] = null;
+        if (!form[field] && team.length === 1) form[field] = team[0].id;
+    }
+}
+watch(
+    () => form.brand_id,
+    (id) => {
+        // knowledge base entries and products belong to the old brand; plain links stay
+        form.brief_references = form.brief_references.filter((r) => r.kind === 'link');
+        applyBrandDefaults(props.brands.find((b) => b.id === id));
+    },
+);
+if (!props.plan) applyBrandDefaults(brand.value); // a brand chosen by the link, or the only one
 
 // ---- tabs & layout ---------------------------------------------------------------------
+const VIEW_TAB = { production: 'brief', approval: 'detail', publisher: 'kit' };
 const storedTab = () => {
     try {
         return sessionStorage.getItem('content-plan-tab');
@@ -58,8 +92,14 @@ const storedTab = () => {
         return null;
     }
 };
-// A new plan always starts on The brief; an existing one reopens on the tab you last used.
-const tab = ref(props.plan && ['brief', 'detail'].includes(storedTab()) ? storedTab() : 'brief');
+// A shared link opens the tab that suits its audience; a new plan starts on The brief; an
+// existing one reopens on the tab you used last.
+const initialTab = () => {
+    if (!props.plan) return 'brief';
+    if (props.view) return VIEW_TAB[props.view];
+    return ['brief', 'detail', 'kit'].includes(storedTab()) ? storedTab() : 'brief';
+};
+const tab = ref(initialTab());
 watch(tab, (value) => {
     try {
         if (value !== 'preview') sessionStorage.setItem('content-plan-tab', value);
@@ -76,29 +116,27 @@ const onMedia = (e) => {
 };
 if (isWide.value && tab.value === 'preview') tab.value = 'brief';
 
-const activeType = ref(form.post_types[0] ?? null);
+const activeType = ref(form.content_types[0] ?? null);
 watch(
-    () => form.post_types.slice(),
+    () => form.content_types.slice(),
     (types) => {
         if (!types.includes(activeType.value)) activeType.value = types[0] ?? null;
     },
 );
 
-const hasContent = (p) => p.media_links.some((m) => m.trim() !== '') || p.caption.trim() !== '' || p.tags.length > 0 || p.note.trim() !== '';
+const hasContent = (p) => p.media_links.some((m) => !isBlank(m)) || !isBlank(p.caption) || p.tags.length > 0 || !isBlank(p.note);
 
-function togglePostType(value) {
-    const at = form.post_types.indexOf(value);
-
-    if (at === -1) {
-        const order = props.postTypes.map((t) => t.value);
-        form.post_types = order.filter((v) => v === value || form.post_types.includes(v));
-        if (!activeType.value) activeType.value = value;
-        return;
+// Ticking or unticking content types; unticking one that has content asks first.
+function changeContentTypes({ add, remove }) {
+    const lost = remove.filter((k) => form.posts[k] && hasContent(form.posts[k]));
+    if (lost.length) {
+        const names = lost.map((k) => flat.value[k].full_label).join(', ');
+        if (!window.confirm(`Remove ${names}? Its media, caption, tags and note will be discarded when you save.`)) return;
     }
 
-    const label = props.postTypes.find((t) => t.value === value).label;
-    if (hasContent(form.posts[value]) && !window.confirm(`Remove ${label}? Its media, caption, tags and note will be discarded when you save.`)) return;
-    form.post_types.splice(at, 1);
+    const next = new Set([...form.content_types, ...add]);
+    remove.forEach((k) => next.delete(k));
+    form.content_types = orderKeys(props.contentTypes, [...next]);
 }
 
 // ---- submitting --------------------------------------------------------------------------
@@ -109,6 +147,8 @@ const CONFIRM = {
 };
 
 const errorKeys = computed(() => Object.keys(form.errors));
+const briefErrors = computed(() => errorKeys.value.filter((k) => !k.startsWith('posts.')));
+const postErrors = computed(() => errorKeys.value.filter((k) => k.startsWith('posts.')));
 
 // An error disappears as soon as the person edits the field it belongs to.
 function clearErrorsFor(...prefixes) {
@@ -117,7 +157,7 @@ function clearErrorsFor(...prefixes) {
 }
 for (const key of Object.keys(form.data())) {
     if (key === 'posts') continue;
-    const related = key === 'publish_at' ? [key, 'deadline_at'] : [key];
+    const related = key === 'publish_at' ? [key, 'deadline_at'] : key === 'brand_id' ? [key, 'content_pillar_id', 'brief_references'] : [key];
     watch(() => form[key], () => clearErrorsFor(...related), { deep: true });
 }
 watch(
@@ -125,15 +165,13 @@ watch(
     () => activeType.value && clearErrorsFor(`posts.${activeType.value}`),
     { deep: true },
 );
-const briefErrors = computed(() => errorKeys.value.filter((k) => !k.startsWith('posts.')));
-const postErrors = computed(() => errorKeys.value.filter((k) => k.startsWith('posts.')));
 
 function onErrors() {
     if (briefErrors.value.length) tab.value = 'brief';
     else if (postErrors.value.length) {
         tab.value = 'detail';
-        const withError = props.postTypes.find((t) => postErrors.value.some((k) => k.startsWith(`posts.${t.value}.`)));
-        if (withError) activeType.value = withError.value;
+        const key = Object.keys(flat.value).find((k) => postErrors.value.some((e) => e.startsWith(`posts.${k}.`)));
+        if (key) activeType.value = key;
     }
     nextTick(() => document.getElementById('error-summary')?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
 }
@@ -144,9 +182,13 @@ function submit(action) {
     form.transform((data) => ({
         ...data,
         action,
-        // Only the ticked post types are sent; blank media rows are dropped.
+        // blank link boxes are dropped; entries are sent by id only
+        brief_references: data.brief_references
+            .filter((r) => r.kind !== 'link' || !isBlank(r.url))
+            .map((r) => (r.kind === 'link' ? { kind: 'link', url: r.url.trim() } : { kind: r.kind, id: r.id })),
+        // only the ticked content types are sent
         posts: Object.fromEntries(
-            data.post_types.map((t) => [t, { ...data.posts[t], media_links: data.posts[t].media_links.filter((m) => m.trim() !== '') }]),
+            data.content_types.map((k) => [k, { ...data.posts[k], media_links: data.posts[k].media_links.filter((m) => !isBlank(m)) }]),
         ),
     }));
 
@@ -175,12 +217,29 @@ const buttonStyle = {
     review: 'bg-slate-800 text-white hover:bg-slate-900',
 };
 
+const VIEW_BANNER = {
+    production: 'Production view: read the brief, then add media, captions and tags in Post detail. Press Submit to Review when you’re done.',
+    approval: 'Approval view: check the preview, caption and brief. Use Return to Production if something needs to change.',
+    publisher: 'Publisher view: copy the caption, download the files, and post at the scheduled time.',
+};
 const banner = computed(() => {
     if (!props.plan) return null;
+    if (props.view) return VIEW_BANNER[props.view];
     if (!props.abilities.editBrief && props.abilities.editPosts)
         return 'The brief was set by the content manager. Fill in the post details, then submit to review when everything is ready.';
     if (!props.abilities.editBrief && !props.abilities.editPosts) return 'You can view this plan, but it can’t be edited right now.';
     return null;
+});
+
+// who each share link is meant for (shown in the share menu)
+const people = computed(() => {
+    const a = props.plan?.assignees ?? {};
+    const names = (list) => list.filter(Boolean).map((p) => p.name);
+    return {
+        production: names([a.multimedia_creator_id, a.copywriter_id]),
+        approval: names([props.contentManager]),
+        publisher: names([a.publisher_id]),
+    };
 });
 
 // ---- leaving with unsaved changes -------------------------------------------------------
@@ -203,8 +262,13 @@ onBeforeUnmount(() => {
     window.removeEventListener('beforeunload', warnOnUnload);
 });
 
-const tabClass = (name) =>
-    tab.value === name ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-800';
+const tabs = computed(() => [
+    { key: 'brief', label: 'The brief', errors: briefErrors.value.length },
+    { key: 'detail', label: 'Post detail', errors: postErrors.value.length },
+    ...(props.plan ? [{ key: 'kit', label: 'Publish kit' }] : []),
+    ...(!isWide.value ? [{ key: 'preview', label: 'Preview' }] : []),
+]);
+const tabClass = (name) => (tab.value === name ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-800');
 </script>
 
 <template>
@@ -215,9 +279,12 @@ const tabClass = (name) =>
                 <h1 class="text-2xl font-semibold">{{ plan ? 'Content Plan' : 'Add Content Plan' }}</h1>
                 <StatusBadge :status="status" />
             </div>
-            <div v-if="plan" class="text-xs text-slate-500">
-                <span v-if="plan.production_started_label">Production started {{ plan.production_started_label }}</span>
-                <span v-if="plan.review_submitted_label"> · Submitted to review {{ plan.review_submitted_label }}</span>
+            <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+                <div v-if="plan" class="text-xs text-slate-500">
+                    <span v-if="plan.production_started_label">Production started {{ plan.production_started_label }}</span>
+                    <span v-if="plan.review_submitted_label"> · Submitted to review {{ plan.review_submitted_label }}</span>
+                </div>
+                <ShareMenu v-if="plan" :plan="plan" :brand-name="brand?.name ?? ''" :people="people" />
             </div>
         </div>
 
@@ -232,47 +299,42 @@ const tabClass = (name) =>
         <div class="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_400px]">
             <!-- Column 1: tabs -->
             <section class="min-w-0">
-                <div role="tablist" class="mb-4 flex gap-1 border-b border-[#dcdcde]">
-                    <button type="button" role="tab" :aria-selected="tab === 'brief'" class="-mb-px flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-medium" :class="tabClass('brief')" @click="tab = 'brief'">
-                        The brief
-                        <span v-if="briefErrors.length" class="rounded-full bg-red-600 px-1.5 text-[11px] leading-5 text-white">{{ briefErrors.length }}</span>
+                <div role="tablist" class="mb-4 flex flex-wrap gap-1 border-b border-[#dcdcde]">
+                    <button v-for="t in tabs" :key="t.key" type="button" role="tab" :aria-selected="tab === t.key" class="-mb-px flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-medium" :class="tabClass(t.key)" @click="tab = t.key">
+                        {{ t.label }}
+                        <span v-if="t.errors" class="rounded-full bg-red-600 px-1.5 text-[11px] leading-5 text-white">{{ t.errors }}</span>
                     </button>
-                    <button type="button" role="tab" :aria-selected="tab === 'detail'" class="-mb-px flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-medium" :class="tabClass('detail')" @click="tab = 'detail'">
-                        Post detail
-                        <span v-if="postErrors.length" class="rounded-full bg-red-600 px-1.5 text-[11px] leading-5 text-white">{{ postErrors.length }}</span>
-                    </button>
-                    <button v-if="!isWide" type="button" role="tab" :aria-selected="tab === 'preview'" class="-mb-px border-b-2 px-4 py-2.5 text-sm font-medium" :class="tabClass('preview')" @click="tab = 'preview'">Preview</button>
                 </div>
 
                 <BriefTab
                     v-show="tab === 'brief'"
                     :form="form"
                     :brands="brands"
-                    :users="users"
-                    :post-types="postTypes"
-                    :suggestions="suggestions"
-                    :limits="limits"
+                    :content-types="contentTypes"
                     :content-manager="contentManager"
+                    :assignees="plan?.assignees ?? {}"
                     :timezone="timezone"
                     :deadline-hours="deadlineHours"
+                    :limits="limits"
                     :disabled="!abilities.editBrief"
-                    @toggle-post-type="togglePostType"
+                    @change-types="changeContentTypes"
                 />
                 <PostDetailTab
                     v-show="tab === 'detail'"
                     v-model:active-type="activeType"
                     :form="form"
-                    :post-types="postTypes"
+                    :content-types="contentTypes"
                     :limits="limits"
                     :timezone="timezone"
                     :disabled="!abilities.editPosts"
                     @go-brief="tab = 'brief'"
                 />
+                <PublishKit v-if="plan && tab === 'kit'" :plan="{ ...plan, title: form.title }" :brand="brand" :types="selectedTypes" :posts="form.posts" :publisher="plan.assignees.publisher_id" />
                 <PreviewPane v-if="!isWide" v-show="tab === 'preview'" v-model:active-type="activeType" :brand="brand" :types="selectedTypes" :posts="form.posts" :publish-at="form.publish_at" />
             </section>
 
             <!-- Column 2: preview -->
-            <aside v-if="isWide" class="sticky top-20">
+            <aside v-if="isWide" class="sticky top-20 max-h-[calc(100vh-10rem)] overflow-y-auto rounded-lg">
                 <PreviewPane v-model:active-type="activeType" :brand="brand" :types="selectedTypes" :posts="form.posts" :publish-at="form.publish_at" />
             </aside>
         </div>

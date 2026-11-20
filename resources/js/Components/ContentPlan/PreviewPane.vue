@@ -1,17 +1,29 @@
 <script setup>
-import InstagramPreview from './InstagramPreview.vue';
-import PostTypeIcon from './PostTypeIcon.vue';
+import { computed } from 'vue';
+import ContentPreview from './ContentPreview.vue';
+import PlatformIcon from './PlatformIcon.vue';
+import TypeIcon from './TypeIcon.vue';
 
-defineProps({
+const props = defineProps({
     brand: { type: Object, default: null },
-    types: { type: Array, default: () => [] }, // [{ value, label }] for the post types ticked in the brief
+    types: { type: Array, default: () => [] }, // the ticked content types (registry entries), in tree order
     posts: { type: Object, default: () => ({}) },
     activeType: { type: String, default: null },
     publishAt: { type: String, default: '' },
 });
 const emit = defineEmits(['update:activeType']);
 
-const short = (label) => label.replace('Instagram ', '');
+const active = computed(() => props.types.find((t) => t.key === props.activeType) ?? null);
+
+// Two levels keep it compact however many types are ticked: platform first, then its types.
+const platforms = computed(() => {
+    const seen = new Map();
+    for (const t of props.types) if (!seen.has(t.platform)) seen.set(t.platform, { key: t.platform, label: t.platform_label });
+    return [...seen.values()];
+});
+const ofPlatform = computed(() => props.types.filter((t) => t.platform === active.value?.platform));
+
+const pickPlatform = (key) => emit('update:activeType', props.types.find((t) => t.platform === key).key);
 </script>
 
 <template>
@@ -21,36 +33,50 @@ const short = (label) => label.replace('Instagram ', '');
             <span class="text-xs text-slate-500">Approximate</span>
         </div>
 
-        <div v-if="types.length" class="p-4">
-            <div role="tablist" aria-label="Post type preview" class="mb-4 flex flex-wrap gap-1.5">
+        <div v-if="active" class="p-4">
+            <div v-if="platforms.length > 1" role="tablist" aria-label="Platform" class="mb-2 flex flex-wrap gap-1.5">
                 <button
-                    v-for="t in types"
-                    :key="t.value"
+                    v-for="p in platforms"
+                    :key="p.key"
                     type="button"
                     role="tab"
-                    :aria-selected="activeType === t.value"
-                    class="flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition"
-                    :class="activeType === t.value ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50'"
-                    @click="emit('update:activeType', t.value)"
+                    :aria-selected="active.platform === p.key"
+                    class="flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold transition"
+                    :class="active.platform === p.key ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'"
+                    @click="pickPlatform(p.key)"
                 >
-                    <PostTypeIcon :type="t.value" :size="14" />
-                    {{ short(t.label) }}
+                    <PlatformIcon :platform="p.key" :size="14" /> {{ p.label }}
                 </button>
             </div>
 
-            <InstagramPreview
-                v-if="activeType && posts[activeType]"
-                :key="activeType"
-                :type="activeType"
+            <div role="tablist" aria-label="Content type" class="mb-4 flex flex-wrap gap-1.5">
+                <button
+                    v-for="t in ofPlatform"
+                    :key="t.key"
+                    type="button"
+                    role="tab"
+                    :aria-selected="activeType === t.key"
+                    class="flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition"
+                    :class="activeType === t.key ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50'"
+                    @click="emit('update:activeType', t.key)"
+                >
+                    <TypeIcon :icon="t.icon" :size="14" /> {{ t.label }}
+                </button>
+            </div>
+
+            <ContentPreview
+                v-if="posts[active.key]"
+                :key="active.key"
+                :type="active"
                 :brand="brand"
-                :media="posts[activeType].media_links"
-                :caption="posts[activeType].caption"
-                :tags="posts[activeType].tags"
+                :media="posts[active.key].media_links"
+                :caption="posts[active.key].caption"
+                :tags="posts[active.key].tags"
                 :publish-at="publishAt"
             />
         </div>
         <div v-else class="px-6 py-14 text-center text-sm text-slate-500">
-            Tick a post type in <b>The brief</b> to see its preview here.
+            Choose a content type in <b>The brief</b> to see its preview here.
         </div>
 
         <p class="border-t border-[#f0f0f1] bg-slate-50 px-4 py-2 text-xs text-slate-500">
